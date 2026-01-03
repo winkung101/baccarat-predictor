@@ -3,15 +3,28 @@ import { PlayingCard } from "./PlayingCard";
 import { ScoreBoard } from "./ScoreBoard";
 import { Statistics } from "./Statistics";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import { Card, GameResult, createShoe, playHand } from "@/lib/baccarat";
 import { cn } from "@/lib/utils";
-import { RotateCcw, PlayCircle } from "lucide-react";
+import { RotateCcw, PlayCircle, Edit2, Check } from "lucide-react";
+
+const suitSymbols: Record<string, string> = {
+  hearts: "♥",
+  diamonds: "♦",
+  clubs: "♣",
+  spades: "♠",
+};
+
+const formatCard = (card: Card) => `${card.rank}${suitSymbols[card.suit]}`;
 
 export const BaccaratGame = () => {
   const [shoe, setShoe] = useState<Card[]>(() => createShoe());
   const [currentResult, setCurrentResult] = useState<GameResult | null>(null);
   const [history, setHistory] = useState<("P" | "B" | "T")[]>([]);
   const [isDealing, setIsDealing] = useState(false);
+  const [roundNumber, setRoundNumber] = useState(1);
+  const [isEditingRound, setIsEditingRound] = useState(false);
+  const [tempRoundNumber, setTempRoundNumber] = useState("1");
 
   const dealNewHand = useCallback(() => {
     if (isDealing) return;
@@ -24,6 +37,7 @@ export const BaccaratGame = () => {
       setShoe(remainingShoe);
       setCurrentResult(result);
       setHistory((prev) => [...prev, result.winner]);
+      setRoundNumber((prev) => prev + 1);
       setIsDealing(false);
     }, 300);
   }, [shoe, isDealing]);
@@ -33,7 +47,21 @@ export const BaccaratGame = () => {
     setCurrentResult(null);
     setHistory([]);
     setIsDealing(false);
+    setRoundNumber(1);
   }, []);
+
+  const handleEditRound = () => {
+    setTempRoundNumber(roundNumber.toString());
+    setIsEditingRound(true);
+  };
+
+  const handleSaveRound = () => {
+    const num = parseInt(tempRoundNumber);
+    if (!isNaN(num) && num >= 1) {
+      setRoundNumber(num);
+    }
+    setIsEditingRound(false);
+  };
 
   const renderHand = (cards: Card[], score: number, label: string, isWinner: boolean, isPlayer: boolean) => (
     <div className={cn(
@@ -109,10 +137,42 @@ export const BaccaratGame = () => {
           </h1>
           
           {/* Game Info */}
-          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 mt-4">
-            <div className="bg-secondary/50 rounded-lg px-4 py-2 border border-border/50">
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 mt-4">
+            {/* Round Number - Editable */}
+            <div className="bg-secondary/50 rounded-lg px-4 py-2 border border-border/50 flex items-center gap-2">
               <span className="text-muted-foreground text-sm">รอบที่</span>
-              <span className="text-gold font-bold text-xl ml-2">{history.length + 1}</span>
+              {isEditingRound ? (
+                <div className="flex items-center gap-1">
+                  <Input
+                    type="number"
+                    value={tempRoundNumber}
+                    onChange={(e) => setTempRoundNumber(e.target.value)}
+                    className="w-16 h-8 text-center bg-background/50 border-gold/30 text-gold font-bold"
+                    min={1}
+                    onKeyDown={(e) => e.key === "Enter" && handleSaveRound()}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleSaveRound}
+                    className="h-8 w-8 p-0 text-gold hover:bg-gold/20"
+                  >
+                    <Check className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1">
+                  <span className="text-gold font-bold text-xl">{roundNumber}</span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleEditRound}
+                    className="h-6 w-6 p-0 text-muted-foreground hover:text-gold hover:bg-gold/20"
+                  >
+                    <Edit2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
             </div>
             
             <div className="bg-secondary/50 rounded-lg px-4 py-2 border border-border/50">
@@ -128,6 +188,52 @@ export const BaccaratGame = () => {
             </div>
           </div>
         </header>
+
+        {/* Current Cards Display */}
+        {currentResult && (
+          <div className="bg-secondary/30 rounded-xl border border-gold/20 p-4">
+            <h3 className="text-gold font-serif text-lg text-center mb-3">ไพ่ที่เปิด (รอบที่ {roundNumber - 1})</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Player Cards */}
+              <div className="flex items-center justify-center gap-2 bg-player/10 rounded-lg p-3">
+                <span className="text-player font-semibold">P:</span>
+                <div className="flex gap-2">
+                  {currentResult.playerCards.map((card, i) => (
+                    <span 
+                      key={i} 
+                      className={cn(
+                        "font-mono text-lg font-bold px-2 py-1 bg-background/80 rounded",
+                        card.suit === "hearts" || card.suit === "diamonds" ? "text-red-500" : "text-foreground"
+                      )}
+                    >
+                      {formatCard(card)}
+                    </span>
+                  ))}
+                </div>
+                <span className="text-player font-bold ml-2">= {currentResult.playerScore}</span>
+              </div>
+              
+              {/* Banker Cards */}
+              <div className="flex items-center justify-center gap-2 bg-banker/10 rounded-lg p-3">
+                <span className="text-banker font-semibold">B:</span>
+                <div className="flex gap-2">
+                  {currentResult.bankerCards.map((card, i) => (
+                    <span 
+                      key={i} 
+                      className={cn(
+                        "font-mono text-lg font-bold px-2 py-1 bg-background/80 rounded",
+                        card.suit === "hearts" || card.suit === "diamonds" ? "text-red-500" : "text-foreground"
+                      )}
+                    >
+                      {formatCard(card)}
+                    </span>
+                  ))}
+                </div>
+                <span className="text-banker font-bold ml-2">= {currentResult.bankerScore}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Game Table */}
         <div className="bg-card/30 backdrop-blur rounded-2xl border border-gold/20 p-4 sm:p-6 lg:p-8">
