@@ -107,9 +107,26 @@ export const BaccaratGame = () => {
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-serif font-bold text-gold text-shadow-gold">
             Baccarat Simulator
           </h1>
-          <p className="text-muted-foreground mt-2">
-            Cards in shoe: <span className="text-gold">{shoe.length}</span>
-          </p>
+          
+          {/* Game Info */}
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 mt-4">
+            <div className="bg-secondary/50 rounded-lg px-4 py-2 border border-border/50">
+              <span className="text-muted-foreground text-sm">รอบที่</span>
+              <span className="text-gold font-bold text-xl ml-2">{history.length + 1}</span>
+            </div>
+            
+            <div className="bg-secondary/50 rounded-lg px-4 py-2 border border-border/50">
+              <span className="text-muted-foreground text-sm">เปิดไปแล้ว</span>
+              <span className="text-gold font-bold text-xl ml-2">{history.length}</span>
+              <span className="text-muted-foreground text-sm ml-1">มือ</span>
+            </div>
+            
+            <div className="bg-secondary/50 rounded-lg px-4 py-2 border border-border/50">
+              <span className="text-muted-foreground text-sm">ไพ่เหลือ</span>
+              <span className="text-gold font-bold text-xl ml-2">{shoe.length}</span>
+              <span className="text-muted-foreground text-sm ml-1">ใบ</span>
+            </div>
+          </div>
         </header>
 
         {/* Game Table */}
