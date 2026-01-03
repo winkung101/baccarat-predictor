@@ -2,11 +2,12 @@ import { useState, useCallback } from "react";
 import { PlayingCard } from "./PlayingCard";
 import { ScoreBoard } from "./ScoreBoard";
 import { Statistics } from "./Statistics";
+import { CardSelector } from "./CardSelector";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Card, GameResult, createShoe, playHand } from "@/lib/baccarat";
+import { Card, GameResult, createShoe, playHand, calculateHandValue } from "@/lib/baccarat";
 import { cn } from "@/lib/utils";
-import { RotateCcw, PlayCircle, Edit2, Check } from "lucide-react";
+import { RotateCcw, PlayCircle, Edit2, Check, Settings2 } from "lucide-react";
 
 const suitSymbols: Record<string, string> = {
   hearts: "♥",
@@ -25,6 +26,7 @@ export const BaccaratGame = () => {
   const [roundNumber, setRoundNumber] = useState(1);
   const [isEditingRound, setIsEditingRound] = useState(false);
   const [tempRoundNumber, setTempRoundNumber] = useState("1");
+  const [showCardSelector, setShowCardSelector] = useState(false);
 
   const dealNewHand = useCallback(() => {
     if (isDealing) return;
@@ -42,12 +44,45 @@ export const BaccaratGame = () => {
     }, 300);
   }, [shoe, isDealing]);
 
+  const handleManualCards = useCallback((playerCards: Card[], bankerCards: Card[]) => {
+    const playerScore = calculateHandValue(playerCards);
+    const bankerScore = calculateHandValue(bankerCards);
+    
+    let winner: "P" | "B" | "T";
+    if (playerScore > bankerScore) {
+      winner = "P";
+    } else if (bankerScore > playerScore) {
+      winner = "B";
+    } else {
+      winner = "T";
+    }
+
+    const isNatural = 
+      calculateHandValue(playerCards.slice(0, 2)) >= 8 || 
+      calculateHandValue(bankerCards.slice(0, 2)) >= 8;
+
+    const result: GameResult = {
+      playerCards,
+      bankerCards,
+      playerScore,
+      bankerScore,
+      winner,
+      isNatural,
+    };
+
+    setCurrentResult(result);
+    setHistory((prev) => [...prev, winner]);
+    setRoundNumber((prev) => prev + 1);
+    setShowCardSelector(false);
+  }, []);
+
   const resetGame = useCallback(() => {
     setShoe(createShoe());
     setCurrentResult(null);
     setHistory([]);
     setIsDealing(false);
     setRoundNumber(1);
+    setShowCardSelector(false);
   }, []);
 
   const handleEditRound = () => {
@@ -189,8 +224,16 @@ export const BaccaratGame = () => {
           </div>
         </header>
 
+        {/* Card Selector Modal */}
+        {showCardSelector && (
+          <CardSelector
+            onConfirm={handleManualCards}
+            onCancel={() => setShowCardSelector(false)}
+          />
+        )}
+
         {/* Current Cards Display */}
-        {currentResult && (
+        {currentResult && !showCardSelector && (
           <div className="bg-secondary/30 rounded-xl border border-gold/20 p-4">
             <h3 className="text-gold font-serif text-lg text-center mb-3">ไพ่ที่เปิด (รอบที่ {roundNumber - 1})</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -236,66 +279,77 @@ export const BaccaratGame = () => {
         )}
 
         {/* Game Table */}
-        <div className="bg-card/30 backdrop-blur rounded-2xl border border-gold/20 p-4 sm:p-6 lg:p-8">
-          {/* Winner Announcement */}
-          <div className="h-16 sm:h-20 flex items-center justify-center mb-4">
-            {currentResult && getWinnerText()}
-          </div>
+        {!showCardSelector && (
+          <div className="bg-card/30 backdrop-blur rounded-2xl border border-gold/20 p-4 sm:p-6 lg:p-8">
+            {/* Winner Announcement */}
+            <div className="h-16 sm:h-20 flex items-center justify-center mb-4">
+              {currentResult && getWinnerText()}
+            </div>
 
-          {/* Cards Display */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-12">
-            {currentResult ? (
-              <>
-                {renderHand(
-                  currentResult.playerCards,
-                  currentResult.playerScore,
-                  "PLAYER",
-                  currentResult.winner === "P",
-                  true
-                )}
-                {renderHand(
-                  currentResult.bankerCards,
-                  currentResult.bankerScore,
-                  "BANKER",
-                  currentResult.winner === "B",
-                  false
-                )}
-              </>
-            ) : (
-              <>
-                <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-player/10 min-h-[200px] justify-center">
-                  <div className="text-xl sm:text-2xl font-serif font-bold text-player">PLAYER</div>
-                  <div className="text-muted-foreground">กดปุ่มเพื่อเริ่มเกม</div>
-                </div>
-                <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-banker/10 min-h-[200px] justify-center">
-                  <div className="text-xl sm:text-2xl font-serif font-bold text-banker">BANKER</div>
-                  <div className="text-muted-foreground">กดปุ่มเพื่อเริ่มเกม</div>
-                </div>
-              </>
-            )}
-          </div>
+            {/* Cards Display */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-12">
+              {currentResult ? (
+                <>
+                  {renderHand(
+                    currentResult.playerCards,
+                    currentResult.playerScore,
+                    "PLAYER",
+                    currentResult.winner === "P",
+                    true
+                  )}
+                  {renderHand(
+                    currentResult.bankerCards,
+                    currentResult.bankerScore,
+                    "BANKER",
+                    currentResult.winner === "B",
+                    false
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-player/10 min-h-[200px] justify-center">
+                    <div className="text-xl sm:text-2xl font-serif font-bold text-player">PLAYER</div>
+                    <div className="text-muted-foreground">กดปุ่มเพื่อเริ่มเกม</div>
+                  </div>
+                  <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-banker/10 min-h-[200px] justify-center">
+                    <div className="text-xl sm:text-2xl font-serif font-bold text-banker">BANKER</div>
+                    <div className="text-muted-foreground">กดปุ่มเพื่อเริ่มเกม</div>
+                  </div>
+                </>
+              )}
+            </div>
 
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
-            <Button
-              onClick={dealNewHand}
-              disabled={isDealing}
-              className="bg-gold-gradient text-primary-foreground hover:opacity-90 text-lg px-8 py-6 font-semibold glow-pulse"
-            >
-              <PlayCircle className="mr-2 h-6 w-6" />
-              {isDealing ? "กำลังแจก..." : "เปิดไพ่"}
-            </Button>
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
+              <Button
+                onClick={dealNewHand}
+                disabled={isDealing}
+                className="bg-gold-gradient text-primary-foreground hover:opacity-90 text-lg px-8 py-6 font-semibold glow-pulse"
+              >
+                <PlayCircle className="mr-2 h-6 w-6" />
+                {isDealing ? "กำลังแจก..." : "สุ่มเปิดไพ่"}
+              </Button>
 
-            <Button
-              onClick={resetGame}
-              variant="outline"
-              className="border-gold/50 text-gold hover:bg-gold/10 text-lg px-8 py-6"
-            >
-              <RotateCcw className="mr-2 h-5 w-5" />
-              เริ่มใหม่
-            </Button>
+              <Button
+                onClick={() => setShowCardSelector(true)}
+                variant="outline"
+                className="border-gold/50 text-gold hover:bg-gold/10 text-lg px-8 py-6"
+              >
+                <Settings2 className="mr-2 h-5 w-5" />
+                ตั้งค่าไพ่เอง
+              </Button>
+
+              <Button
+                onClick={resetGame}
+                variant="outline"
+                className="border-muted-foreground/50 text-muted-foreground hover:bg-muted/20 text-lg px-8 py-6"
+              >
+                <RotateCcw className="mr-2 h-5 w-5" />
+                เริ่มใหม่
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Stats and Scoreboard */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
