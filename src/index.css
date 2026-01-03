@@ -37,10 +37,11 @@
 
     --radius: 0.75rem;
 
-    /* Custom casino colors */
-    --player: 0 70% 55%;
+    /* Custom casino colors - ปรับแก้ตามคำขอ */
+    /* Player -> น้ำเงิน (220), Banker -> แดง (0) */
+    --player: 220 70% 55%;
     --player-foreground: 0 0% 100%;
-    --banker: 220 70% 50%;
+    --banker: 0 70% 55%;
     --banker-foreground: 0 0% 100%;
     --tie: 120 50% 45%;
     --tie-foreground: 0 0% 100%;
