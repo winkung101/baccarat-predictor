@@ -3,15 +3,15 @@ import { PlayingCard } from "./PlayingCard";
 import { ScoreBoard } from "./ScoreBoard";
 import { Statistics } from "./Statistics";
 import { CardSelector } from "./CardSelector";
+import { ScreenCapture } from "./ScreenCapture";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Card, GameResult, createShoe, playHand, calculateHandValue, prepareShoe } from "@/lib/baccarat";
 import { calculateNextMove, PredictionResult } from "@/lib/prediction";
-import { runSimulation, SimulationStats } from "@/lib/simulation"; // ต้องแน่ใจว่า import ถูกต้อง
+import { runSimulation, SimulationStats } from "@/lib/simulation";
 import { cn } from "@/lib/utils";
-import { RotateCcw, PlayCircle, Edit2, Check, Settings2, PenTool, Activity, ArrowRightCircle, BarChart3, BrainCircuit, Cpu, Loader2, Sparkles, Undo2, Layers } from "lucide-react";
-// Import Toast (ถ้าโปรเจคมี UI component นี้) หรือใช้ state แสดงข้อความง่ายๆ
-// สมมติว่าใช้ Alert ง่ายๆ หรือแสดงข้อความในหน้าจอ
+import { RotateCcw, PlayCircle, Edit2, Check, Settings2, PenTool, Activity, ArrowRightCircle, BarChart3, BrainCircuit, Cpu, Loader2, Sparkles, Undo2, Layers, Scan } from "lucide-react";
+import { toast } from "sonner";
 
 const generateMockCards = (winner: "P" | "B" | "T"): { pCards: Card[], bCards: Card[] } => {
   const suits = ["spades", "hearts", "clubs", "diamonds"] as const;
@@ -43,7 +43,8 @@ export const BaccaratGame = () => {
   const [isEditingRound, setIsEditingRound] = useState(false);
   const [tempRoundNumber, setTempRoundNumber] = useState("1");
   const [showCardSelector, setShowCardSelector] = useState(false);
-  const [gameMessage, setGameMessage] = useState<string>(""); // ข้อความแจ้งเตือน (เช่น ตัดไพ่)
+  const [showScreenCapture, setShowScreenCapture] = useState(false);
+  const [gameMessage, setGameMessage] = useState<string>("");
 
   // ... (ส่วน Simulation State และ Logic คงเดิม) ...
   const [isSimulating, setIsSimulating] = useState(false);
@@ -170,6 +171,22 @@ export const BaccaratGame = () => {
     setHistory((prev) => [...prev, winner]);
     setRoundNumber((prev) => prev + 1);
     setShowCardSelector(false);
+  }, [history, currentResult, roundNumber]);
+
+  // Handle AI-detected cards from screen capture
+  const handleAIDetectedCards = useCallback((playerCards: Card[], bankerCards: Card[]) => {
+    // Save state before adding
+    setHistoryStack((prev) => [...prev, { history: [...history], result: currentResult, roundNumber }]);
+    
+    const playerScore = calculateHandValue(playerCards);
+    const bankerScore = calculateHandValue(bankerCards);
+    let winner: "P" | "B" | "T" = playerScore > bankerScore ? "P" : bankerScore > playerScore ? "B" : "T";
+    const result: GameResult = { playerCards, bankerCards, playerScore, bankerScore, winner, isNatural: playerScore >= 8 || bankerScore >= 8 };
+    setCurrentResult(result);
+    setHistory((prev) => [...prev, winner]);
+    setRoundNumber((prev) => prev + 1);
+    
+    toast.success(`AI ตรวจพบไพ่! ${winner === "P" ? "Player ชนะ" : winner === "B" ? "Banker ชนะ" : "เสมอ"}`);
   }, [history, currentResult, roundNumber]);
 
   const addQuickResult = (winner: "P" | "B" | "T") => {
@@ -363,9 +380,15 @@ export const BaccaratGame = () => {
                 <Button onClick={dealNewHand} disabled={isDealing || isSimulating} className="flex-1 bg-gold-gradient text-black hover:opacity-90 font-bold shadow-lg h-10"><PlayCircle className="mr-2 w-4 h-4"/> Deal</Button>
                 <Button onClick={undoLastResult} disabled={historyStack.length === 0 || isSimulating} variant="ghost" size="icon" className="border border-white/10 text-yellow-400 h-10 w-12" title="ย้อนกลับ"><Undo2 className="w-4 h-4"/></Button>
                 <Button onClick={() => setShowCardSelector(true)} variant="ghost" size="icon" className="border border-white/10 h-10 w-12"><Settings2 className="w-4 h-4"/></Button>
+                <Button onClick={() => setShowScreenCapture(!showScreenCapture)} variant="ghost" size="icon" className={cn("border border-white/10 h-10 w-12", showScreenCapture && "bg-indigo-600/30 border-indigo-500/50")} title="AI Screen Detection"><Scan className="w-4 h-4 text-indigo-400"/></Button>
                 <Button onClick={resetGame} variant="ghost" size="icon" className="border border-white/10 text-red-400 h-10 w-12"><RotateCcw className="w-4 h-4"/></Button>
              </div>
         </div>
+
+        {/* AI Screen Capture */}
+        {showScreenCapture && (
+          <ScreenCapture onCardsDetected={handleAIDetectedCards} />
+        )}
 
         {showCardSelector && <CardSelector onConfirm={handleManualCards} onCancel={() => setShowCardSelector(false)} />}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4"><Statistics history={history} /><ScoreBoard history={history} /></div>
