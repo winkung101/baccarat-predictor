@@ -41,6 +41,39 @@ export const createShoe = (numDecks: number = 8): Card[] => {
   return shoe;
 };
 
+// --- ฟังก์ชันตัดไพ่ (Burn Cards) ---
+export const burnCards = (shoe: Card[]): Card[] => {
+  const newShoe = [...shoe];
+  
+  // 1. จั่วไพ่ใบแรก (Cut Card) เพื่อดูว่าจะตัดกี่ใบ
+  const cutCard = newShoe.pop();
+  if (!cutCard) return newShoe;
+
+  let burnCount = 0;
+  // กติกา: A=1, 2-9=ตามหน้าไพ่, 10/J/Q/K=10
+  if (["10", "J", "Q", "K"].includes(cutCard.rank)) {
+    burnCount = 10;
+  } else if (cutCard.rank === "A") {
+    burnCount = 1;
+  } else {
+    burnCount = parseInt(cutCard.rank);
+  }
+
+  // 2. ทิ้งไพ่ตามจำนวนที่กำหนด (Burn)
+  for (let i = 0; i < burnCount; i++) {
+    newShoe.pop();
+  }
+
+  console.log(`Burned ${burnCount} cards based on ${cutCard.rank}`); // Log ให้รู้
+  return newShoe;
+};
+
+// ฟังก์ชันเตรียมขอนใหม่ (สร้าง + สับ + ตัดไพ่)
+export const prepareShoe = (): Card[] => {
+  const s = createShoe();
+  return burnCards(s);
+};
+
 export const calculateHandValue = (cards: Card[]): number => {
   const total = cards.reduce((sum, card) => sum + card.value, 0);
   return total % 10;
@@ -87,13 +120,15 @@ export interface GameResult {
 }
 
 export const playHand = (shoe: Card[]): { result: GameResult; remainingShoe: Card[] } => {
-  if (shoe.length < 6) {
-    shoe = createShoe();
+  let currentShoe = [...shoe];
+  
+  // ตัดไพ่อัตโนมัติเมื่อไพ่เหลือน้อย (Penetration ~15 ใบ) เพื่อความสมจริง
+  if (currentShoe.length < 15) {
+    currentShoe = prepareShoe();
   }
 
-  const newShoe = [...shoe];
-  const playerCards: Card[] = [newShoe.pop()!, newShoe.pop()!];
-  const bankerCards: Card[] = [newShoe.pop()!, newShoe.pop()!];
+  const playerCards: Card[] = [currentShoe.pop()!, currentShoe.pop()!];
+  const bankerCards: Card[] = [currentShoe.pop()!, currentShoe.pop()!];
 
   let playerScore = calculateHandValue(playerCards);
   let bankerScore = calculateHandValue(bankerCards);
@@ -105,14 +140,14 @@ export const playHand = (shoe: Card[]): { result: GameResult; remainingShoe: Car
     // Player draws
     let playerThirdCard: Card | null = null;
     if (shouldPlayerDraw(playerScore)) {
-      playerThirdCard = newShoe.pop()!;
+      playerThirdCard = currentShoe.pop()!;
       playerCards.push(playerThirdCard);
       playerScore = calculateHandValue(playerCards);
     }
 
     // Banker draws
     if (shouldBankerDraw(bankerScore, playerThirdCard)) {
-      bankerCards.push(newShoe.pop()!);
+      bankerCards.push(currentShoe.pop()!);
       bankerScore = calculateHandValue(bankerCards);
     }
   }
@@ -135,6 +170,6 @@ export const playHand = (shoe: Card[]): { result: GameResult; remainingShoe: Car
       winner,
       isNatural,
     },
-    remainingShoe: newShoe,
+    remainingShoe: currentShoe,
   };
 };
