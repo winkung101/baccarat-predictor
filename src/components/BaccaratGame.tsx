@@ -37,6 +37,7 @@ export const BaccaratGame = () => {
   const [currentResult, setCurrentResult] = useState<GameResult | null>(null);
   const [forecastResult, setForecastResult] = useState<GameResult | null>(null);
   const [history, setHistory] = useState<("P" | "B" | "T")[]>([]);
+  const [historyStack, setHistoryStack] = useState<{ history: ("P" | "B" | "T")[], result: GameResult | null, roundNumber: number }[]>([]);
   const [isDealing, setIsDealing] = useState(false);
   const [roundNumber, setRoundNumber] = useState(1);
   const [isEditingRound, setIsEditingRound] = useState(false);
@@ -135,8 +136,10 @@ export const BaccaratGame = () => {
   const dealNewHand = useCallback(() => {
     if (isDealing) return;
     setIsDealing(true);
-    setCurrentResult(null);
     setGameMessage(""); // เคลียร์ข้อความเก่า
+    
+    // Save state before dealing
+    setHistoryStack((prev) => [...prev, { history: [...history], result: currentResult, roundNumber }]);
 
     setTimeout(() => {
       // ตรวจสอบ Cut Card (ถ้าไพ่เหลือน้อยกว่า 10% ของ 8 สำรับ คือประมาณ 40-50 ใบ)
@@ -153,9 +156,12 @@ export const BaccaratGame = () => {
       setRoundNumber((prev) => prev + 1);
       setIsDealing(false);
     }, 300);
-  }, [shoe, isDealing]);
+  }, [shoe, isDealing, history, currentResult, roundNumber]);
 
   const handleManualCards = useCallback((playerCards: Card[], bankerCards: Card[]) => {
+    // Save state before adding
+    setHistoryStack((prev) => [...prev, { history: [...history], result: currentResult, roundNumber }]);
+    
     const playerScore = calculateHandValue(playerCards);
     const bankerScore = calculateHandValue(bankerCards);
     let winner: "P" | "B" | "T" = playerScore > bankerScore ? "P" : bankerScore > playerScore ? "B" : "T";
@@ -164,9 +170,12 @@ export const BaccaratGame = () => {
     setHistory((prev) => [...prev, winner]);
     setRoundNumber((prev) => prev + 1);
     setShowCardSelector(false);
-  }, []);
+  }, [history, currentResult, roundNumber]);
 
   const addQuickResult = (winner: "P" | "B" | "T") => {
+    // Save state before adding
+    setHistoryStack((prev) => [...prev, { history: [...history], result: currentResult, roundNumber }]);
+    
     const { pCards, bCards } = generateMockCards(winner);
     const result = { playerCards: pCards, bankerCards: bCards, playerScore: calculateHandValue(pCards), bankerScore: calculateHandValue(bCards), winner, isNatural: false };
     setCurrentResult(result);
@@ -199,6 +208,21 @@ export const BaccaratGame = () => {
   const handleEditRound = () => { setTempRoundNumber(roundNumber.toString()); setIsEditingRound(true); };
   const handleSaveRound = () => { const num = parseInt(tempRoundNumber); if (!isNaN(num) && num >= 1) setRoundNumber(num); setIsEditingRound(false); };
 
+  // Undo last result
+  const undoLastResult = useCallback(() => {
+    if (historyStack.length === 0) return;
+    const lastState = historyStack[historyStack.length - 1];
+    setHistory(lastState.history);
+    setCurrentResult(lastState.result);
+    setRoundNumber(lastState.roundNumber);
+    setHistoryStack((prev) => prev.slice(0, -1));
+  }, [historyStack]);
+
+  // Save state before adding result
+  const saveState = useCallback(() => {
+    setHistoryStack((prev) => [...prev, { history: [...history], result: currentResult, roundNumber }]);
+  }, [history, currentResult, roundNumber]);
+
   // ... (renderMiniHand และอื่นๆ เหมือนเดิม) ...
   const renderMiniHand = (cards: Card[], score: number, label: string, isWinner: boolean, isPlayer: boolean, isForecast: boolean = false) => (
     <div className={cn(
@@ -207,15 +231,15 @@ export const BaccaratGame = () => {
         isForecast ? "bg-purple-900/10 border-purple-500/20" : 
         (isPlayer ? "bg-player/5 border-player/20" : "bg-banker/5 border-banker/20")
     )}>
-      <div className="flex justify-between w-full items-center px-1 mb-1">
+      <div className="flex justify-between w-full items-center px-1 mb-2">
         <span className={cn("text-[10px] font-bold uppercase tracking-wider", isPlayer ? "text-player" : "text-banker")}>{label}</span>
         <span className={cn("text-lg font-bold px-2.5 py-0.5 rounded-lg shadow-sm", isPlayer ? "bg-player text-white" : "bg-banker text-white")}>{score}</span>
       </div>
-      <div className="flex gap-1.5 justify-center h-20 items-center w-full px-2">
+      <div className="flex gap-1 justify-center items-center w-full px-1">
         {cards.map((c, i) => (
-          <PlayingCard key={i} suit={c.suit} rank={c.rank} delay={isForecast ? 0 : i * 50} className={cn("w-10 h-14 sm:w-12 sm:h-16 text-xs sm:text-sm shadow-md transition-all hover:z-20 hover:-translate-y-2 relative", i > 0 && "-ml-5 sm:-ml-6")} />
+          <PlayingCard key={i} suit={c.suit} rank={c.rank} delay={isForecast ? 0 : i * 50} className="w-8 h-12 sm:w-10 sm:h-14 text-[10px] sm:text-xs shadow-md" />
         ))}
-        {cards.length === 0 && <div className="w-10 h-14 opacity-0"></div>}
+        {cards.length === 0 && <div className="w-8 h-12 opacity-0"></div>}
       </div>
     </div>
   );
@@ -337,6 +361,7 @@ export const BaccaratGame = () => {
              </div>
              <div className="flex gap-2">
                 <Button onClick={dealNewHand} disabled={isDealing || isSimulating} className="flex-1 bg-gold-gradient text-black hover:opacity-90 font-bold shadow-lg h-10"><PlayCircle className="mr-2 w-4 h-4"/> Deal</Button>
+                <Button onClick={undoLastResult} disabled={historyStack.length === 0 || isSimulating} variant="ghost" size="icon" className="border border-white/10 text-yellow-400 h-10 w-12" title="ย้อนกลับ"><Undo2 className="w-4 h-4"/></Button>
                 <Button onClick={() => setShowCardSelector(true)} variant="ghost" size="icon" className="border border-white/10 h-10 w-12"><Settings2 className="w-4 h-4"/></Button>
                 <Button onClick={resetGame} variant="ghost" size="icon" className="border border-white/10 text-red-400 h-10 w-12"><RotateCcw className="w-4 h-4"/></Button>
              </div>
