@@ -12,7 +12,10 @@ import {
   AlertCircle,
   Scan,
   Pause,
-  Play
+  Play,
+  Target,
+  Move,
+  Settings2
 } from "lucide-react";
 
 interface DetectedCard {
@@ -26,6 +29,13 @@ interface DetectionResult {
   bankerCards: DetectedCard[];
   confidence: number;
   message: string;
+}
+
+interface CaptureRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 interface ScreenCaptureProps {
@@ -44,6 +54,9 @@ const convertDetectedCard = (card: DetectedCard): Card => ({
   value: rankToValue(card.rank)
 });
 
+const DEFAULT_PLAYER_REGION: CaptureRegion = { x: 10, y: 50, width: 35, height: 40 };
+const DEFAULT_BANKER_REGION: CaptureRegion = { x: 55, y: 50, width: 35, height: 40 };
+
 export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
   const [isCapturing, setIsCapturing] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -52,10 +65,21 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   
+  // Region selection
+  const [showRegionSettings, setShowRegionSettings] = useState(false);
+  const [playerRegion, setPlayerRegion] = useState<CaptureRegion>(DEFAULT_PLAYER_REGION);
+  const [bankerRegion, setBankerRegion] = useState<CaptureRegion>(DEFAULT_BANKER_REGION);
+  const [useRegionCapture, setUseRegionCapture] = useState(true);
+  const [activeRegion, setActiveRegion] = useState<"player" | "banker" | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const playerCanvasRef = useRef<HTMLCanvasElement>(null);
+  const bankerCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
 
   const startCapture = async () => {
     try {
@@ -122,6 +146,31 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
     }
   };
 
+  // Crop region from video
+  const cropRegion = (
+    video: HTMLVideoElement,
+    canvas: HTMLCanvasElement,
+    region: CaptureRegion
+  ): string => {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return "";
+
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    // Convert percentage to pixels
+    const x = (region.x / 100) * videoWidth;
+    const y = (region.y / 100) * videoHeight;
+    const width = (region.width / 100) * videoWidth;
+    const height = (region.height / 100) * videoHeight;
+
+    canvas.width = width;
+    canvas.height = height;
+
+    ctx.drawImage(video, x, y, width, height, 0, 0, width, height);
+    return canvas.toDataURL("image/png");
+  };
+
   const captureAndAnalyze = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current || isAnalyzing) return;
 
@@ -139,15 +188,31 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
     ctx.drawImage(video, 0, 0);
     
     // Get base64 image
-    const imageBase64 = canvas.toDataURL("image/png");
-    setPreviewUrl(imageBase64);
+    const fullImageBase64 = canvas.toDataURL("image/png");
+    setPreviewUrl(fullImageBase64);
     
     setIsAnalyzing(true);
     setError(null);
 
     try {
+      let requestBody: { imageBase64?: string; playerImageBase64?: string; bankerImageBase64?: string; useRegions?: boolean } = {};
+
+      if (useRegionCapture && playerCanvasRef.current && bankerCanvasRef.current) {
+        // Capture specific regions
+        const playerImageBase64 = cropRegion(video, playerCanvasRef.current, playerRegion);
+        const bankerImageBase64 = cropRegion(video, bankerCanvasRef.current, bankerRegion);
+        
+        requestBody = {
+          playerImageBase64,
+          bankerImageBase64,
+          useRegions: true
+        };
+      } else {
+        requestBody = { imageBase64: fullImageBase64 };
+      }
+
       const { data, error: fnError } = await supabase.functions.invoke("detect-cards", {
-        body: { imageBase64 }
+        body: requestBody
       });
 
       if (fnError) throw fnError;
@@ -167,11 +232,40 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [isAnalyzing, onCardsDetected]);
+  }, [isAnalyzing, onCardsDetected, useRegionCapture, playerRegion, bankerRegion]);
 
   // Manual capture button
   const manualCapture = () => {
     captureAndAnalyze();
+  };
+
+  // Region drag handlers
+  const handleRegionMouseDown = (region: "player" | "banker") => (e: React.MouseEvent) => {
+    e.preventDefault();
+    setActiveRegion(region);
+    setIsDragging(true);
+  };
+
+  const handlePreviewMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !activeRegion || !previewContainerRef.current) return;
+
+    const rect = previewContainerRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+    const setRegion = activeRegion === "player" ? setPlayerRegion : setBankerRegion;
+    const region = activeRegion === "player" ? playerRegion : bankerRegion;
+
+    setRegion({
+      ...region,
+      x: Math.max(0, Math.min(100 - region.width, x - region.width / 2)),
+      y: Math.max(0, Math.min(100 - region.height, y - region.height / 2))
+    });
+  };
+
+  const handlePreviewMouseUp = () => {
+    setIsDragging(false);
+    setActiveRegion(null);
   };
 
   // Cleanup on unmount
@@ -190,6 +284,19 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
         </div>
         
         <div className="flex gap-2">
+          <Button
+            onClick={() => setShowRegionSettings(!showRegionSettings)}
+            size="sm"
+            variant="outline"
+            className={cn(
+              "gap-2 border-indigo-500/50",
+              showRegionSettings && "bg-indigo-600/30"
+            )}
+          >
+            <Settings2 className="w-4 h-4" />
+            ตั้งค่าตำแหน่ง
+          </Button>
+          
           {!isCapturing ? (
             <Button
               onClick={startCapture}
@@ -237,6 +344,144 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
         </div>
       </div>
 
+      {/* Region Settings Panel */}
+      {showRegionSettings && (
+        <div className="mb-4 p-3 bg-black/30 rounded-lg border border-indigo-500/20">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Target className="w-4 h-4 text-indigo-400" />
+              <span className="text-sm font-medium text-indigo-200">ตั้งค่าตำแหน่งจับภาพ</span>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useRegionCapture}
+                onChange={(e) => setUseRegionCapture(e.target.checked)}
+                className="w-4 h-4 rounded border-indigo-500 bg-black/50 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span className="text-xs text-gray-400">เปิดใช้งาน</span>
+            </label>
+          </div>
+          
+          {useRegionCapture && (
+            <div className="grid grid-cols-2 gap-4">
+              {/* Player Region Controls */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-player" />
+                  <span className="text-xs font-medium text-player">Player Region</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500">X (%)</label>
+                    <input
+                      type="number"
+                      value={playerRegion.x}
+                      onChange={(e) => setPlayerRegion({ ...playerRegion, x: Number(e.target.value) })}
+                      className="w-full px-2 py-1 text-xs bg-black/50 border border-white/10 rounded"
+                      min={0}
+                      max={100}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">Y (%)</label>
+                    <input
+                      type="number"
+                      value={playerRegion.y}
+                      onChange={(e) => setPlayerRegion({ ...playerRegion, y: Number(e.target.value) })}
+                      className="w-full px-2 py-1 text-xs bg-black/50 border border-white/10 rounded"
+                      min={0}
+                      max={100}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">Width (%)</label>
+                    <input
+                      type="number"
+                      value={playerRegion.width}
+                      onChange={(e) => setPlayerRegion({ ...playerRegion, width: Number(e.target.value) })}
+                      className="w-full px-2 py-1 text-xs bg-black/50 border border-white/10 rounded"
+                      min={5}
+                      max={100}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">Height (%)</label>
+                    <input
+                      type="number"
+                      value={playerRegion.height}
+                      onChange={(e) => setPlayerRegion({ ...playerRegion, height: Number(e.target.value) })}
+                      className="w-full px-2 py-1 text-xs bg-black/50 border border-white/10 rounded"
+                      min={5}
+                      max={100}
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Banker Region Controls */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded bg-banker" />
+                  <span className="text-xs font-medium text-banker">Banker Region</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-gray-500">X (%)</label>
+                    <input
+                      type="number"
+                      value={bankerRegion.x}
+                      onChange={(e) => setBankerRegion({ ...bankerRegion, x: Number(e.target.value) })}
+                      className="w-full px-2 py-1 text-xs bg-black/50 border border-white/10 rounded"
+                      min={0}
+                      max={100}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">Y (%)</label>
+                    <input
+                      type="number"
+                      value={bankerRegion.y}
+                      onChange={(e) => setBankerRegion({ ...bankerRegion, y: Number(e.target.value) })}
+                      className="w-full px-2 py-1 text-xs bg-black/50 border border-white/10 rounded"
+                      min={0}
+                      max={100}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">Width (%)</label>
+                    <input
+                      type="number"
+                      value={bankerRegion.width}
+                      onChange={(e) => setBankerRegion({ ...bankerRegion, width: Number(e.target.value) })}
+                      className="w-full px-2 py-1 text-xs bg-black/50 border border-white/10 rounded"
+                      min={5}
+                      max={100}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500">Height (%)</label>
+                    <input
+                      type="number"
+                      value={bankerRegion.height}
+                      onChange={(e) => setBankerRegion({ ...bankerRegion, height: Number(e.target.value) })}
+                      className="w-full px-2 py-1 text-xs bg-black/50 border border-white/10 rounded"
+                      min={5}
+                      max={100}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          <p className="text-[10px] text-gray-500 mt-3">
+            <Move className="w-3 h-3 inline mr-1" />
+            ลากกรอบในภาพพรีวิวเพื่อปรับตำแหน่ง หรือกรอกค่าตัวเลขโดยตรง
+          </p>
+        </div>
+      )}
+
       {/* Video preview (hidden but needed for capture) */}
       <video 
         ref={videoRef} 
@@ -245,17 +490,70 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
         muted
       />
       <canvas ref={canvasRef} className="hidden" />
+      <canvas ref={playerCanvasRef} className="hidden" />
+      <canvas ref={bankerCanvasRef} className="hidden" />
 
       {/* Preview and Status */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Preview */}
-        <div className="relative aspect-video bg-black/50 rounded-lg overflow-hidden border border-white/10">
+        <div 
+          ref={previewContainerRef}
+          className="relative aspect-video bg-black/50 rounded-lg overflow-hidden border border-white/10 cursor-crosshair"
+          onMouseMove={handlePreviewMouseMove}
+          onMouseUp={handlePreviewMouseUp}
+          onMouseLeave={handlePreviewMouseUp}
+        >
           {previewUrl ? (
-            <img 
-              src={previewUrl} 
-              alt="Preview" 
-              className="w-full h-full object-contain"
-            />
+            <>
+              <img 
+                src={previewUrl} 
+                alt="Preview" 
+                className="w-full h-full object-contain"
+              />
+              
+              {/* Region overlays */}
+              {useRegionCapture && (
+                <>
+                  {/* Player region */}
+                  <div
+                    className={cn(
+                      "absolute border-2 border-player bg-player/20 cursor-move transition-all",
+                      activeRegion === "player" && "ring-2 ring-player ring-offset-1"
+                    )}
+                    style={{
+                      left: `${playerRegion.x}%`,
+                      top: `${playerRegion.y}%`,
+                      width: `${playerRegion.width}%`,
+                      height: `${playerRegion.height}%`
+                    }}
+                    onMouseDown={handleRegionMouseDown("player")}
+                  >
+                    <span className="absolute -top-5 left-0 text-[10px] font-bold text-player bg-black/80 px-1.5 rounded">
+                      PLAYER
+                    </span>
+                  </div>
+                  
+                  {/* Banker region */}
+                  <div
+                    className={cn(
+                      "absolute border-2 border-banker bg-banker/20 cursor-move transition-all",
+                      activeRegion === "banker" && "ring-2 ring-banker ring-offset-1"
+                    )}
+                    style={{
+                      left: `${bankerRegion.x}%`,
+                      top: `${bankerRegion.y}%`,
+                      width: `${bankerRegion.width}%`,
+                      height: `${bankerRegion.height}%`
+                    }}
+                    onMouseDown={handleRegionMouseDown("banker")}
+                  >
+                    <span className="absolute -top-5 left-0 text-[10px] font-bold text-banker bg-black/80 px-1.5 rounded">
+                      BANKER
+                    </span>
+                  </div>
+                </>
+              )}
+            </>
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm">
               {isCapturing ? "กำลังจับภาพหน้าจอ..." : "คลิก \"เริ่มจับภาพ\" เพื่อเริ่มต้น"}
@@ -345,8 +643,8 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
       {/* Instructions */}
       <div className="mt-4 p-3 bg-black/20 rounded-lg border border-white/5">
         <p className="text-[10px] text-gray-500">
-          💡 <span className="text-gray-400">วิธีใช้:</span> คลิก "เริ่มจับภาพ" แล้วเลือกหน้าต่างที่มีโต๊ะบาคาร่า 
-          ระบบจะตรวจจับไพ่อัตโนมัติทุก 3 วินาที หรือคลิก "จับภาพ" เพื่อตรวจจับทันที
+          💡 <span className="text-gray-400">วิธีใช้:</span> คลิก "ตั้งค่าตำแหน่ง" เพื่อกำหนดพื้นที่ Player/Banker บนหน้าจอ 
+          จากนั้นคลิก "เริ่มจับภาพ" และลากกรอบให้ตรงตำแหน่งไพ่ ระบบจะตรวจจับเฉพาะพื้นที่ที่กำหนดเพื่อความแม่นยำสูงสุด
         </p>
       </div>
     </div>
