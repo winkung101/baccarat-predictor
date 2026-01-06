@@ -38,6 +38,8 @@ interface CaptureRegion {
   height: number;
 }
 
+type DragMode = "move" | "resize-tl" | "resize-tr" | "resize-bl" | "resize-br" | null;
+
 interface ScreenCaptureProps {
   onCardsDetected: (playerCards: Card[], bankerCards: Card[]) => void;
 }
@@ -57,6 +59,8 @@ const convertDetectedCard = (card: DetectedCard): Card => ({
 const DEFAULT_PLAYER_REGION: CaptureRegion = { x: 10, y: 50, width: 35, height: 40 };
 const DEFAULT_BANKER_REGION: CaptureRegion = { x: 55, y: 50, width: 35, height: 40 };
 
+const MIN_SIZE = 10; // Minimum region size in percentage
+
 export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
   const [isCapturing, setIsCapturing] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -71,7 +75,8 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
   const [bankerRegion, setBankerRegion] = useState<CaptureRegion>(DEFAULT_BANKER_REGION);
   const [useRegionCapture, setUseRegionCapture] = useState(true);
   const [activeRegion, setActiveRegion] = useState<"player" | "banker" | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const [dragMode, setDragMode] = useState<DragMode>(null);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number; region: CaptureRegion } | null>(null);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -103,7 +108,6 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
       setIsCapturing(true);
       setIsPaused(false);
       
-      // Start auto-detection interval (every 3 seconds)
       startAutoDetection();
       
     } catch (err) {
@@ -146,7 +150,6 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
     }
   };
 
-  // Crop region from video
   const cropRegion = (
     video: HTMLVideoElement,
     canvas: HTMLCanvasElement,
@@ -158,7 +161,6 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
     const videoWidth = video.videoWidth;
     const videoHeight = video.videoHeight;
 
-    // Convert percentage to pixels
     const x = (region.x / 100) * videoWidth;
     const y = (region.y / 100) * videoHeight;
     const width = (region.width / 100) * videoWidth;
@@ -180,14 +182,11 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
     
     if (!ctx) return;
 
-    // Set canvas size to video size
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     
-    // Draw current frame
     ctx.drawImage(video, 0, 0);
     
-    // Get base64 image
     const fullImageBase64 = canvas.toDataURL("image/png");
     setPreviewUrl(fullImageBase64);
     
@@ -198,7 +197,6 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
       let requestBody: { imageBase64?: string; playerImageBase64?: string; bankerImageBase64?: string; useRegions?: boolean } = {};
 
       if (useRegionCapture && playerCanvasRef.current && bankerCanvasRef.current) {
-        // Capture specific regions
         const playerImageBase64 = cropRegion(video, playerCanvasRef.current, playerRegion);
         const bankerImageBase64 = cropRegion(video, bankerCanvasRef.current, bankerRegion);
         
@@ -234,46 +232,122 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
     }
   }, [isAnalyzing, onCardsDetected, useRegionCapture, playerRegion, bankerRegion]);
 
-  // Manual capture button
   const manualCapture = () => {
     captureAndAnalyze();
   };
 
-  // Region drag handlers
-  const handleRegionMouseDown = (region: "player" | "banker") => (e: React.MouseEvent) => {
+  // Drag handlers
+  const handleRegionMouseDown = (region: "player" | "banker", mode: DragMode) => (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setActiveRegion(region);
-    setIsDragging(true);
+    setDragMode(mode);
+    
+    if (previewContainerRef.current) {
+      const rect = previewContainerRef.current.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      const currentRegion = region === "player" ? playerRegion : bankerRegion;
+      setDragStart({ x, y, region: { ...currentRegion } });
+    }
   };
 
   const handlePreviewMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !activeRegion || !previewContainerRef.current) return;
+    if (!dragMode || !activeRegion || !previewContainerRef.current || !dragStart) return;
 
     const rect = previewContainerRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
     const setRegion = activeRegion === "player" ? setPlayerRegion : setBankerRegion;
-    const region = activeRegion === "player" ? playerRegion : bankerRegion;
+    const originalRegion = dragStart.region;
 
-    setRegion({
-      ...region,
-      x: Math.max(0, Math.min(100 - region.width, x - region.width / 2)),
-      y: Math.max(0, Math.min(100 - region.height, y - region.height / 2))
-    });
+    const deltaX = x - dragStart.x;
+    const deltaY = y - dragStart.y;
+
+    if (dragMode === "move") {
+      // Move the region
+      setRegion({
+        ...originalRegion,
+        x: Math.max(0, Math.min(100 - originalRegion.width, originalRegion.x + deltaX)),
+        y: Math.max(0, Math.min(100 - originalRegion.height, originalRegion.y + deltaY))
+      });
+    } else if (dragMode === "resize-br") {
+      // Resize from bottom-right
+      const newWidth = Math.max(MIN_SIZE, Math.min(100 - originalRegion.x, originalRegion.width + deltaX));
+      const newHeight = Math.max(MIN_SIZE, Math.min(100 - originalRegion.y, originalRegion.height + deltaY));
+      setRegion({
+        ...originalRegion,
+        width: newWidth,
+        height: newHeight
+      });
+    } else if (dragMode === "resize-bl") {
+      // Resize from bottom-left
+      const newWidth = Math.max(MIN_SIZE, originalRegion.width - deltaX);
+      const newX = Math.max(0, originalRegion.x + originalRegion.width - newWidth);
+      const newHeight = Math.max(MIN_SIZE, Math.min(100 - originalRegion.y, originalRegion.height + deltaY));
+      setRegion({
+        x: newX,
+        y: originalRegion.y,
+        width: Math.min(newWidth, originalRegion.x + originalRegion.width),
+        height: newHeight
+      });
+    } else if (dragMode === "resize-tr") {
+      // Resize from top-right
+      const newWidth = Math.max(MIN_SIZE, Math.min(100 - originalRegion.x, originalRegion.width + deltaX));
+      const newHeight = Math.max(MIN_SIZE, originalRegion.height - deltaY);
+      const newY = Math.max(0, originalRegion.y + originalRegion.height - newHeight);
+      setRegion({
+        x: originalRegion.x,
+        y: newY,
+        width: newWidth,
+        height: Math.min(newHeight, originalRegion.y + originalRegion.height)
+      });
+    } else if (dragMode === "resize-tl") {
+      // Resize from top-left
+      const newWidth = Math.max(MIN_SIZE, originalRegion.width - deltaX);
+      const newHeight = Math.max(MIN_SIZE, originalRegion.height - deltaY);
+      const newX = Math.max(0, originalRegion.x + originalRegion.width - newWidth);
+      const newY = Math.max(0, originalRegion.y + originalRegion.height - newHeight);
+      setRegion({
+        x: newX,
+        y: newY,
+        width: Math.min(newWidth, originalRegion.x + originalRegion.width),
+        height: Math.min(newHeight, originalRegion.y + originalRegion.height)
+      });
+    }
   };
 
   const handlePreviewMouseUp = () => {
-    setIsDragging(false);
+    setDragMode(null);
     setActiveRegion(null);
+    setDragStart(null);
   };
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopCapture();
     };
   }, []);
+
+  const ResizeHandle = ({ position, onMouseDown }: { position: "tl" | "tr" | "bl" | "br"; onMouseDown: (e: React.MouseEvent) => void }) => {
+    const positionClasses = {
+      tl: "-top-1 -left-1 cursor-nwse-resize",
+      tr: "-top-1 -right-1 cursor-nesw-resize",
+      bl: "-bottom-1 -left-1 cursor-nesw-resize",
+      br: "-bottom-1 -right-1 cursor-nwse-resize"
+    };
+    
+    return (
+      <div
+        className={cn(
+          "absolute w-3 h-3 bg-white border-2 rounded-sm z-10",
+          positionClasses[position]
+        )}
+        onMouseDown={onMouseDown}
+      />
+    );
+  };
 
   return (
     <div className="bg-gradient-to-br from-indigo-900/30 to-purple-900/20 backdrop-blur-md rounded-2xl border border-indigo-500/30 p-4">
@@ -477,7 +551,7 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
           
           <p className="text-[10px] text-gray-500 mt-3">
             <Move className="w-3 h-3 inline mr-1" />
-            ลากกรอบในภาพพรีวิวเพื่อปรับตำแหน่ง หรือกรอกค่าตัวเลขโดยตรง
+            ลากกรอบเพื่อเลื่อนตำแหน่ง หรือลากมุมเพื่อปรับขนาด
           </p>
         </div>
       )}
@@ -498,7 +572,7 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
         {/* Preview */}
         <div 
           ref={previewContainerRef}
-          className="relative aspect-video bg-black/50 rounded-lg overflow-hidden border border-white/10 cursor-crosshair"
+          className="relative aspect-video bg-black/50 rounded-lg overflow-hidden border border-white/10 select-none"
           onMouseMove={handlePreviewMouseMove}
           onMouseUp={handlePreviewMouseUp}
           onMouseLeave={handlePreviewMouseUp}
@@ -508,7 +582,8 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
               <img 
                 src={previewUrl} 
                 alt="Preview" 
-                className="w-full h-full object-contain"
+                className="w-full h-full object-contain pointer-events-none"
+                draggable={false}
               />
               
               {/* Region overlays */}
@@ -517,7 +592,7 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
                   {/* Player region */}
                   <div
                     className={cn(
-                      "absolute border-2 border-player bg-player/20 cursor-move transition-all",
+                      "absolute border-2 border-player bg-player/20 transition-colors",
                       activeRegion === "player" && "ring-2 ring-player ring-offset-1"
                     )}
                     style={{
@@ -526,17 +601,26 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
                       width: `${playerRegion.width}%`,
                       height: `${playerRegion.height}%`
                     }}
-                    onMouseDown={handleRegionMouseDown("player")}
                   >
                     <span className="absolute -top-5 left-0 text-[10px] font-bold text-player bg-black/80 px-1.5 rounded">
                       PLAYER
                     </span>
+                    {/* Move handle (center) */}
+                    <div 
+                      className="absolute inset-0 cursor-move"
+                      onMouseDown={handleRegionMouseDown("player", "move")}
+                    />
+                    {/* Resize handles */}
+                    <ResizeHandle position="tl" onMouseDown={handleRegionMouseDown("player", "resize-tl")} />
+                    <ResizeHandle position="tr" onMouseDown={handleRegionMouseDown("player", "resize-tr")} />
+                    <ResizeHandle position="bl" onMouseDown={handleRegionMouseDown("player", "resize-bl")} />
+                    <ResizeHandle position="br" onMouseDown={handleRegionMouseDown("player", "resize-br")} />
                   </div>
                   
                   {/* Banker region */}
                   <div
                     className={cn(
-                      "absolute border-2 border-banker bg-banker/20 cursor-move transition-all",
+                      "absolute border-2 border-banker bg-banker/20 transition-colors",
                       activeRegion === "banker" && "ring-2 ring-banker ring-offset-1"
                     )}
                     style={{
@@ -545,11 +629,20 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
                       width: `${bankerRegion.width}%`,
                       height: `${bankerRegion.height}%`
                     }}
-                    onMouseDown={handleRegionMouseDown("banker")}
                   >
                     <span className="absolute -top-5 left-0 text-[10px] font-bold text-banker bg-black/80 px-1.5 rounded">
                       BANKER
                     </span>
+                    {/* Move handle (center) */}
+                    <div 
+                      className="absolute inset-0 cursor-move"
+                      onMouseDown={handleRegionMouseDown("banker", "move")}
+                    />
+                    {/* Resize handles */}
+                    <ResizeHandle position="tl" onMouseDown={handleRegionMouseDown("banker", "resize-tl")} />
+                    <ResizeHandle position="tr" onMouseDown={handleRegionMouseDown("banker", "resize-tr")} />
+                    <ResizeHandle position="bl" onMouseDown={handleRegionMouseDown("banker", "resize-bl")} />
+                    <ResizeHandle position="br" onMouseDown={handleRegionMouseDown("banker", "resize-br")} />
                   </div>
                 </>
               )}
@@ -643,8 +736,8 @@ export const ScreenCapture = ({ onCardsDetected }: ScreenCaptureProps) => {
       {/* Instructions */}
       <div className="mt-4 p-3 bg-black/20 rounded-lg border border-white/5">
         <p className="text-[10px] text-gray-500">
-          💡 <span className="text-gray-400">วิธีใช้:</span> คลิก "ตั้งค่าตำแหน่ง" เพื่อกำหนดพื้นที่ Player/Banker บนหน้าจอ 
-          จากนั้นคลิก "เริ่มจับภาพ" และลากกรอบให้ตรงตำแหน่งไพ่ ระบบจะตรวจจับเฉพาะพื้นที่ที่กำหนดเพื่อความแม่นยำสูงสุด
+          💡 <span className="text-gray-400">วิธีใช้:</span> ลากกรอบเพื่อเลื่อนตำแหน่ง หรือลากจุดขาวที่มุมเพื่อปรับขนาด 
+          ระบบจะตรวจจับเฉพาะพื้นที่ที่กำหนดเพื่อความแม่นยำสูงสุด
         </p>
       </div>
     </div>
